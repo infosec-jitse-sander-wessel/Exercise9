@@ -1,81 +1,120 @@
+import org.apache.commons.cli.*;
+
+import org.apache.commons.cli.ParseException;
+
 import java.io.*;
 
 /**
- * Created by wessel on 9/22/16.
+ * Created by Sander on 21-9-2016.
  */
 public class Controller {
-    private final String[] args;
+    private static final String INCORRECT_FILENAME_O = "incorrect filename for option -o";
+    private static final String INCORRECT_NUMBER_OF_ARGUMENTS = "incorrect number of arguments";
+    private static final String INCORRECT_FILENAME_I = "incorrect filename for option -i";
+    private CommandLine commandLine;
+    private final Options options;
 
-    private Controller(String[] args) {
-        this.args = args;
-    }
-
-    public static void main(String[] args) throws IOException {
-        Controller controller = new Controller(args);
-        InputStream in = System.in;
-        OutputStream out = System.out;
+    Controller(String[] args) throws Exception {
+        this.options = getOptions();
+        CommandLineParser parser = new BasicParser();
 
         try {
-            System.setIn(new FileInputStream(args[1]));
-            System.setOut(new PrintStream(new FileOutputStream(args[2])));
-            controller.run();
-        } catch (Exception e) {
-            e.printStackTrace();
-            System.exit(1);
-        } finally {
+            this.commandLine = parser.parse(this.options, args);
+        } catch (org.apache.commons.cli.ParseException e) {
+            System.out.println("Incorrect arguments: " + e.getMessage());
+            printHelpPage();
+            throw new Exception("Incorrect input");
+        }
+    }
+
+    private static Options getOptions() {
+        Options options = new Options();
+        options.addOption("h", "help", false, "Display this help page");
+        options.addOption("i", "in-file", true, "Take input from given file");
+        options.addOption("o", "out-file", true, "Output to given file location");
+        return options;
+    }
+
+    private void printHelpPage() {
+        HelpFormatter helpFormatter = new HelpFormatter();
+        helpFormatter.printHelp("[-i <file name>] [-o <file name>] [h] <key>",
+                "En/Decrypts stdin to stdout. using the rc4 encryption method",
+                options, "");
+    }
+
+
+    public void run() throws ParseException, IOException {
+        if (handleHelpOption()) return;
+
+        checkNumberOfArguments();
+
+        InputStream in = handleInputRedirect();
+        OutputStream out = handleOutputRedirect();
+
+
+        String key = commandLine.getArgs()[0];
+        new RC4(key).run();
+
+        handleStreamClosing(in, out);
+    }
+
+    private void checkNumberOfArguments() throws ParseException {
+        if (commandLine.getArgs().length != 1) {
+            System.out.println(INCORRECT_NUMBER_OF_ARGUMENTS);
+            printHelpPage();
+            throw new ParseException(INCORRECT_NUMBER_OF_ARGUMENTS);
+        }
+    }
+
+    private boolean handleHelpOption() {
+        if (commandLine.hasOption("h")) {
+            printHelpPage();
+            return true;
+        }
+        return false;
+    }
+
+    private OutputStream handleOutputRedirect() throws ParseException {
+        OutputStream out = null;
+        if (commandLine.hasOption("o")) {
+            out = System.out;
+            try {
+                System.setOut(new PrintStream(new FileOutputStream(commandLine.getOptionValue("o"))));
+            } catch (FileNotFoundException e) {
+                System.out.println(INCORRECT_FILENAME_O);
+                System.out.close();
+                System.setOut(new PrintStream(out));
+                throw new ParseException(INCORRECT_FILENAME_O);
+            }
+        }
+        return out;
+    }
+
+    private InputStream handleInputRedirect() throws IOException, ParseException {
+        InputStream in = null;
+        if (commandLine.hasOption("i")) {
+            in = System.in;
+            try {
+                System.setIn(new FileInputStream(commandLine.getOptionValue("i")));
+            } catch (FileNotFoundException e) {
+                System.out.println(INCORRECT_FILENAME_I);
+                System.in.close();
+                System.setIn(in);
+                throw new ParseException(INCORRECT_FILENAME_I);
+            }
+        }
+        return in;
+    }
+
+    private void handleStreamClosing(InputStream in, OutputStream out) throws IOException {
+        if (in != null) {
             System.in.close();
-            System.out.close();
             System.setIn(in);
-            System.setOut((PrintStream) out);
+        }
+        if (out != null) {
+            System.out.close();
+            System.setOut(new PrintStream(out));
         }
     }
 
-    private void run() throws IOException {
-        int[] lookupTable = InitKey(args[0]);
-        int i = 0, j = 0;
-
-        while (System.in.available() != 0) {
-            int currentChar = System.in.read();
-            int keyStreamByte = getKeyStreamByte(lookupTable, i, j);
-            int encryptedChar = currentChar ^ keyStreamByte;
-            System.out.write(encryptedChar);
-        }
-    }
-
-    private int getKeyStreamByte(int[] lookupTable, int i, int j) {
-        i = (i + 1) % 256;
-        j = (j + lookupTable[i]) % 256;
-        swap(lookupTable, i, j);
-        int t = (lookupTable[i] + lookupTable[j]) % 256;
-        return lookupTable[t];
-    }
-
-    private int[] InitKey(String arg) {
-        //// TODO: 9/26/16 maybe specify a charset
-        byte[] key = arg.getBytes();
-        int[] lookupTable = new int[256];
-        int[] expendedKey = new int[256];
-
-        for (int i = 0; i < 256; i++) {
-            lookupTable[i] = i;
-            expendedKey[i] = key[i % key.length];
-        }
-
-        scrambleLookupTable(lookupTable, expendedKey);
-
-        return lookupTable;
-    }
-
-    private static void swap(int[] lookupTable, int i, int j) {
-        int temp = lookupTable[i];
-        lookupTable[i] = lookupTable[j];
-        lookupTable[j] = temp;
-    }
-
-    private static void scrambleLookupTable(int[] lookupTable, int[] expendedKey) {
-        for (int i = 0, j = 0; i < 256; i++) {
-            j = (j + lookupTable[i] + expendedKey[i]) % 256;
-            swap(lookupTable, lookupTable[i], j);
-        }
-    }
 }
